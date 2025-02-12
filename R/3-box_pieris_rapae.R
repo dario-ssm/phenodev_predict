@@ -939,7 +939,7 @@ rate_summation_scale_compare <- rate_summation_emergence %>%
                names_to = "time_res",
                values_to = "doe")
 # incorporate observational data from Gordo & Sanz (2006)
-pieris_obs_trends <- read_csv(here("Data/pieris_devdata/gordo_sanz_2006_doe.csv")) 
+pieris_obs_trends <- read_csv(here("data/gordo_sanz_2006_doe.csv")) 
 rate_summation_scale_obs <- rate_summation_scale_compare %>% 
   bind_rows(pieris_obs_trends) %>% 
   mutate()
