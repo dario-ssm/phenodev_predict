@@ -10,7 +10,7 @@ library(sf)
 library(easyclimate)
 
 ## load pieris rapae only data counting
-piepra_raw_count_data_csv <- read_delim(("~/GitHub/dev_rapae/dev_rapae/data_source/peticio_sansegundo.csv")) |> 
+piepra_raw_count_data_csv <- read_delim(("~/dev_rapae/data_source/peticio_sansegundo.csv")) |> 
   glimpse()
 
 
@@ -132,7 +132,8 @@ rate_sum_preds_daily <- daily_rate_preds_cbms |>
          doy = yday(date)) |> 
   summarise(day_of_emergence = sum(emergence_lgl))  #number of days until threshold is reach
 
-rate_sum_preds_daily
+daily_preds_ratesum_cbms <- rate_sum_preds_daily |> 
+  mutate(time_slot = "daily")
 
 ##hourly
 daily_temps_doy <- daily_temperatures  |> 
@@ -141,6 +142,7 @@ daily_temps_doy <- daily_temperatures  |>
   hourly_temps_cbms <- tibble()
 
 for(transect_i in unique(daily_temps_doy$ID_coords)) {
+  print(paste0(transect_i, "/", length(unique(daily_temps_doy$ID_coords))))
   daily_temps_doy_i <- daily_temps_doy |> 
     filter(ID_coords == transect_i)
   lat_i <- unique(daily_temps_doy_i$lat)
@@ -166,6 +168,7 @@ hourly_temps_cbms
 hourly_rate_preds <- tibble()
 
 for(model_i in unique(selected_models_pieris_rapae$model_name)) {
+  print(paste0("Predicting phenology from TPC model ", model_i))
   rate_hourly_i <- rate_pred(model2ratesum = model_i,
                              temperature = hourly_temps_cbms,
                              fitted_params = selected_models_pieris_rapae,
@@ -179,34 +182,42 @@ rate_sum_preds_hourly <- hourly_rate_preds |>
                                is.na(rate_pred) ~0, # <- zeros where model yields NA
                                .default = rate_pred), 
          rate_pred = rate_pred*100/24) |>  # 24h a day
-  group_by(year, model_name) |> 
+  group_by(year, model_name, ID_coords) |> 
   mutate(rate_sum = cumsum(rate_pred), #heat summation
          emergence_lgl = logic_ratesum(rate_sum), #threshold point
          doy = yday(date)) |> 
   summarise(day_of_emergence = round(sum(emergence_lgl)/24))  #number of days until threshold is reach
 
-rate_sum_preds_hourly
+hourly_preds_ratesum_cbms <- rate_sum_preds_hourly |> 
+  mutate(time_slot = "hourly")
+
+## combine them:
+preds_ratesum_cbms <- bind_rows(daily_preds_ratesum_cbms,
+                                hourly_preds_ratesum_cbms)
+write_rds(preds_ratesum_cbms, file = here("data/preds_ratesum_cbms.rds"))
 ## and observations:
 first_emergence_adult_sites <- sites |> 
   group_by(year, ID_coords) |> 
   slice_min(date) |> 
   mutate(doy = yday(date))
 
-doe_nonlinear_cbms <- ggplot(rate_sum_preds_daily,
+doe_nonlinear_cbms <- ggplot(preds_ratesum_cbms,
                              aes(x = year, 
-                                 y = day_of_emergence))+
-  geom_point(color = "#3A848B", 
-             alpha = .1)+
-
-  geom_smooth(color = "#3A848B",
-              fill = "#3A848B")+
+                                 y = day_of_emergence,
+                                 ))+
+  geom_point(aes(color = time_slot), 
+             alpha = .2)+
+  geom_smooth(aes(color = time_slot,
+                  fill = time_slot))+
+  scale_fill_manual(values = c("#3A848B", "#E85038"))+
+  scale_color_manual(values = c("#3A848B", "#E85038"))+
   facet_wrap(~model_name)+
   theme_clean()+
   geom_point(data = first_emergence_adult_sites,
              aes(x = year,
                  y = doy),
              color = "#E9C86B",
-             alpha = .1)+
+             alpha = .2)+
 
   geom_smooth(data = first_emergence_adult_sites,
               aes(x = year, y  = doy),
@@ -215,3 +226,46 @@ doe_nonlinear_cbms <- ggplot(rate_sum_preds_daily,
   labs(x = "Year",
        y = "Day of first adult emergence")
 doe_nonlinear_cbms
+#gilbert
+ggsave(filename = here("figures/doe_nonlinear_cbms.png"),
+       width = 2600, height = 2600, units = "px")
+
+ggsave(filename = here("figures/doe_nonlinear_cbms.svg"))
+
+
+###### by transect -------------------------------------------------------------
+
+for(transect_i in unique(preds_ratesum_cbms$ID_coords)){
+  first_emergence_adult_sites_i <- first_emergence_adult_sites |>
+    filter(ID_coords == transect_i)
+  preds_ratesum_cbms_i <- preds_ratesum_cbms |> 
+    filter(ID_coords == transect_i)
+  doe_nonlinear_cbms_transect_i <- ggplot(preds_ratesum_cbms_i,
+                               aes(x = year, 
+                                   y = day_of_emergence,
+                               ))+
+    geom_point(aes(color = time_slot), 
+               alpha = .2)+
+    geom_smooth(aes(color = time_slot,
+                    fill = time_slot))+
+    scale_fill_manual(values = c("#3A848B", "#E85038"))+
+    scale_color_manual(values = c("#3A848B", "#E85038"))+
+    facet_wrap(~model_name)+
+    theme_clean()+
+    geom_point(data = first_emergence_adult_sites_i,
+               aes(x = year,
+                   y = doy),
+               color = "#E9C86B",
+               alpha = .2)+
+    
+    geom_smooth(data = first_emergence_adult_sites_i,
+                aes(x = year, y  = doy),
+                color = "#E9C86B",
+                fill = "#E9C86B")+
+    labs(x = "Year",
+         y = "Day of first adult emergence",
+         title = paste("Transect", transect_i))
+  
+  ggsave(filename = here(paste0("figures/cbms_transects_preds/doe_nonlinear_cbms_", transect_i, ".png")),
+         width = 2600, height = 2600, units = "px")
+  }
