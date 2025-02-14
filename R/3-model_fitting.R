@@ -511,48 +511,100 @@ ggsave(filename = here("figures/gilbert_modelpreds_validate_rmsep.svg"),
 
 
 # 4. Thermal regimes ---------------------------------------
-daily_temperatures_plot <- ggplot(daily_temperatures,
-                                  aes(x = date, y = daily_tavg))+
-  geom_point()+
-  geom_line()
 
-library(ggridges)
-
-ggplot(daily_temperatures, aes(x = yday(date), y = daily_tavg)) +
-  geom_bin2d(bins = 50) +
-  khroma::scale_fill_lajolla()+
-  theme_minimal()+
-  theme(axis.text.x = element_text(angle = 90))+
+daily_temperatures_doy <- daily_temperatures |> 
+  filter(year %in% 1952:2004) |> 
+  mutate(doy = yday(date)) |> 
+  rename(tmin = daily_tmin,
+         tmax = daily_tmax,
+         tavg = daily_tavg) |> 
+  pivot_longer(cols = c(2, 3, 5),
+               names_to = "temp_var",
+               values_to = "daily_temperature")
+  
+ggplot(daily_temperatures_doy, aes(x = doy, y = daily_temperature)) +
+  geom_point(aes(color = temp_var), alpha = .1)+
+  scale_color_manual(values = c("#F1CB56", "#E36944", "#7FD3C3"))+
+  ggdark::dark_theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = "none")+
   labs(x = "Day of Year",
-       y = "Average temperature",
-       fill = "No. years")
+       y = "Daily temperature",
+       color = "Temperature variables")
+
+ggsave(here("figures/daily_temperature_regimes.png"),
+       width = 2400,
+       height = 2400,
+       units = "px")
 ggsave(here("figures/daily_temperature_regimes.svg"),
        width = 2400,
        height = 2400,
        units = "px") 
 
-## and plot all TPCs
+daily_temperatures_doy_decades <- daily_temperatures_doy |> 
+  mutate(decade = case_when(year %in% c(1950:1959) ~ "1950's",
+                            year %in% c(1960:1969) ~ "1960's",
+                            year %in% c(1970:1979) ~ "1970's",
+                            year %in% c(1980:1989) ~ "1980's",
+                            year %in% c(1990:1999) ~ "1990's",
+                            year %in% c(2000:2009) ~ "2000's",
+                            year %in% c(2010:2015) ~ "2010's"
+                            )
+         ) |> 
+  group_by(decade) |> 
+  mutate(decade_count_day = rep(1:(n()/3), each = 3)) |>  # Assign the same value to all rows for the same doy
+  ungroup()
 
-plot_devmodels(temp = schmalensee_pieris_data$temp,
-               dev_rate = schmalensee_pieris_data$dev.rate,
-               fitted_parameters = fit_models_pieris_rapae,
+ggplot(daily_temperatures_doy_decades, aes(x = decade_count_day, y = daily_temperature)) +
+  #geom_point(aes(color = temp_var), alpha =.3)+
+  geom_line(aes(color = temp_var),
+            linewidth = .5,
+            alpha = 1)+
+  scale_color_manual(values = c("#F1CB56", "#E36944", "#7FD3C3"))+
+  scale_x_reverse()+
+  ggdark::dark_theme_minimal()+
+  labs(x = "Days",
+       y = "Daily temperature",
+       color = "Temperature variables")+
+  coord_flip()+
+  facet_wrap(~decade,
+             scales = "free_x",
+             nrow = 1
+             )+
+  theme(legend.position = "none")
+
+ggsave(here("figures/daily_temperature_regimes_decades.png"),
+       width = 2500,
+       height = 4000,
+       units = "px")
+
+ggsave(here("figures/daily_temperature_regimes_decades.svg"),
+       width = 2500,
+       height = 4000,
+       units = "px")
+
+## and plot oneill
+
+plot_devmodels(temp = gilbert_pieris_data$temp,
+               dev_rate = gilbert_pieris_data$dev.rate,
+               fitted_parameters = selected_models_pieris_rapae |> 
+                 filter(model_name == "oneill"),
                species = "Pieris rapae",
                life_stage = "Pupa")+
-  labs(title = my_species_name)+
-  khroma::scale_color_batlow(discrete = TRUE)+
-  khroma::scale_fill_batlow(discrete = TRUE)+
-  theme_few()+
-  theme(legend.position = "bottom")+
-  facet_null()+
-  geom_bin2d(data = daily_temperatures, 
-             aes(x = yday(date), y = daily_tavg),
-             bins = 50) +
+  labs(title = NULL,
+       subtitle = NULL,
+       y = NULL,
+       x = NULL)+
+  scale_fill_manual(values = "#f39e71ff")+
+  scale_color_manual(values = "#f39e71ff")+
   theme_minimal()+
-  theme(axis.text.x = element_text(angle = 90))
-
-ggsave(here("figures/all_tpcs.svg"),
-       width = 2400,
-       height = 2400,
+  theme(legend.position = "none",
+        axis.text = element_blank())+
+  facet_null()
+  
+ggsave(here("figures/oneill.svg"),
+       width = 600,
+       height = 600,
        units = "px")
 
 # 5. Data from CBMS -------------------------------------------------------

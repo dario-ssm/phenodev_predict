@@ -77,18 +77,17 @@ coords_transects <- piepra_selected_sites |>
   slice(1) |> 
   ungroup() |> 
   select(lat, lon)
-site_1 <- piepra_selected_sites |> 
-  filter(id_transect %in% (1:10)) |> 
+sites <- piepra_selected_sites |> 
   rename(ID_coords = id_transect)
 
-first_emergence_adult_site_1 <- site_1 |> 
+first_emergence_adult_sites<- sites |> 
   group_by(year) |> 
   slice_min(date) |> 
   mutate(doy = yday(date))
 
-years_site1 <- sort(unique(site_1$year))
+years_sites <- sort(unique(sites$year))
 
-sites_coords <- site_1 |> 
+sites_coords <- sites |> 
   group_by(ID_coords) |> 
   slice(1) |> 
   ungroup() |> 
@@ -110,7 +109,7 @@ daily_temperatures <- easyclimate_temp_transects |>
                                .f = ~mean(c(.x, .y), na.rm = TRUE))) |> 
   mutate(year = year(date))
 
-
+##daily
 daily_rate_preds_cbms <- tibble()
 
   for(model_i in unique(selected_models_pieris_rapae$model_name)) {
@@ -127,7 +126,7 @@ rate_sum_preds_daily <- daily_rate_preds_cbms |>
                                is.na(rate_pred) ~0, # <- zeros where model yields NA
                                .default = rate_pred), 
          rate_pred = 100*rate_pred) |>  # as rate_dev equals 1/days_dev
-  group_by(year, model_name) |> 
+  group_by(year, model_name, ID_coords) |> 
   mutate(rate_sum = cumsum(rate_pred), #heat summation
          emergence_lgl = logic_ratesum(rate_sum), #threshold point
          doy = yday(date)) |> 
@@ -135,7 +134,60 @@ rate_sum_preds_daily <- daily_rate_preds_cbms |>
 
 rate_sum_preds_daily
 
-first_emergence_adult_sites <- site_1 |> 
+##hourly
+daily_temps_doy <- daily_temperatures  |> 
+  mutate(JDay = yday(date)) 
+
+  hourly_temps_cbms <- tibble()
+
+for(transect_i in unique(daily_temps_doy$ID_coords)) {
+  daily_temps_doy_i <- daily_temps_doy |> 
+    filter(ID_coords == transect_i)
+  lat_i <- unique(daily_temps_doy_i$lat)
+  hourly_temps_i <- chillR::make_hourly_temps(latitude = lat_i,
+                                              year_file = daily_temps_doy_i,
+                                              keep_sunrise_sunset = TRUE) |> 
+    pivot_longer(cols = 13:36,
+                 names_to = "hour_of_day",
+                 values_to = "temperature") |>  
+    rename(tmax = Tmax,
+           tmin = Tmin,
+           sunrise = Sunrise,
+           sunset = Sunset,
+           daylength = Daylength,
+           doy = JDay
+           ) 
+  
+  hourly_temps_cbms <- bind_rows(hourly_temps_cbms, hourly_temps_i) 
+}
+  
+hourly_temps_cbms
+
+hourly_rate_preds <- tibble()
+
+for(model_i in unique(selected_models_pieris_rapae$model_name)) {
+  rate_hourly_i <- rate_pred(model2ratesum = model_i,
+                             temperature = hourly_temps_cbms,
+                             fitted_params = selected_models_pieris_rapae,
+                             res = "hourly")
+  hourly_rate_preds <- bind_rows(hourly_rate_preds, rate_hourly_i)
+}
+hourly_rate_preds
+
+rate_sum_preds_hourly <- hourly_rate_preds |> 
+  mutate(rate_pred = case_when(rate_pred < 0 ~ 0, # <- avoid negative summation
+                               is.na(rate_pred) ~0, # <- zeros where model yields NA
+                               .default = rate_pred), 
+         rate_pred = rate_pred*100/24) |>  # 24h a day
+  group_by(year, model_name) |> 
+  mutate(rate_sum = cumsum(rate_pred), #heat summation
+         emergence_lgl = logic_ratesum(rate_sum), #threshold point
+         doy = yday(date)) |> 
+  summarise(day_of_emergence = round(sum(emergence_lgl)/24))  #number of days until threshold is reach
+
+rate_sum_preds_hourly
+## and observations:
+first_emergence_adult_sites <- sites |> 
   group_by(year, ID_coords) |> 
   slice_min(date) |> 
   mutate(doy = yday(date))
@@ -144,10 +196,8 @@ doe_nonlinear_cbms <- ggplot(rate_sum_preds_daily,
                              aes(x = year, 
                                  y = day_of_emergence))+
   geom_point(color = "#3A848B", 
-             alpha = .6)+
-  geom_line(color = "#3A848B", 
-            alpha = .6,
-            linetype = "dashed")+
+             alpha = .1)+
+
   geom_smooth(color = "#3A848B",
               fill = "#3A848B")+
   facet_wrap(~model_name)+
@@ -156,13 +206,8 @@ doe_nonlinear_cbms <- ggplot(rate_sum_preds_daily,
              aes(x = year,
                  y = doy),
              color = "#E9C86B",
-             alpha = .6)+
-  geom_line(data = first_emergence_adult_sites,
-            aes(x = year,
-                y = doy),
-            color = "#E9C86B",
-            linetype = "dashed",
-            alpha = .6)+
+             alpha = .1)+
+
   geom_smooth(data = first_emergence_adult_sites,
               aes(x = year, y  = doy),
               color = "#E9C86B",
