@@ -1,4 +1,4 @@
-# 0. Load ----
+# 1. CBMS data ----
 library(tidyverse)
 library(here)
 library(lubridate)
@@ -10,9 +10,12 @@ library(sf)
 library(easyclimate)
 
 ## load pieris rapae only data counting
-piepra_raw_count_data_csv <- read_delim(("~/dev_rapae/data_source/peticio_sansegundo.csv")) |> 
-  glimpse()
+piepra_raw_count_data_csv <- read_delim("~/GitHub/dev_rapae/dev_rapae/data_source/peticio_sansegundo.csv") |> 
+  mutate(Nindiv = if_else(Nindiv == 0.5, # <- misread with R
+                          1,
+                          Nindiv))
 
+## a) Regular data set -----------------------------------------------------
 
 piepra_raw_count_data <- piepra_raw_count_data_csv |> 
   rename(id_transect = IDitin,
@@ -30,54 +33,107 @@ piepra_raw_count_data <- piepra_raw_count_data_csv |>
   relocate(id_transect, id_species, year, date, n_indiv, length, lat, lon) |> 
   glimpse()
 
-##transects with at least ten years
-piepra_selected_sites <- piepra_raw_count_data |> 
-  filter(id_transect %in% c(1, 5, 8, 9, 10, 11, 12, 13, 18, 19, 23, 24, 29, 33, 
-                            34, 40, 42, 43, 51, 52, 58, 59, 60, 64, 67, 68, 69, 
-                            75, 76, 77, 79, 80, 85, 88, 89, 90, 92, 94, 96, 98, 
-                            106, 107, 109, 110, 113, 114, 115, 116, 120, 121, 
-                            123, 125, 127, 128, 155, 168)) |> 
-  #and exclude 2020 due to COVID-19 related lack of sampling
-  filter(year != 2020) |> 
+## a) Combined data set -----------------------------------------------------
+cbms_all_transects <- read_delim("~/GitHub/dev_rapae/dev_rapae/data_source/m_visit_sub.csv") |> 
+ rename(id_transect = SITE_ID,
+        date = DATE)|> 
+  select(id_transect, date) |> 
+  mutate(id_transect = as_factor(id_transect),
+         year = year(date))
+
+pieris_pres_abs <- full_join(piepra_raw_count_data,
+                             cbms_all_transects) |>
   group_by(id_transect) |> 
-  filter(
-    !(id_transect == 5 & year %in% c(2004, 2019)) &
-      !(id_transect == 9 & year %in% c(2004, 2009, 2022)) &
-      !(id_transect == 11 & year %in% c(1997, 1998, 2003, 2004, 2012)) &
-      !(id_transect == 12 & year %in% c(1994, 1995, 2004, 2012, 2018)) &
-      !(id_transect == 13 & year %in% c(2003, 2004)) &
-      !(id_transect == 18 & year %in% 2021) &
-      !(id_transect == 19 & year %in% c(2003, 2004)) &
-      !(id_transect == 24 & year %in% c(1998, 2001, 2012)) &
-      !(id_transect == 29 & year %in% 1997) &
-      !(id_transect == 33 & year %in% c(2003, 2004)) &
-      !(id_transect == 40 & year %in% c(2012, 2017 ,2018)) &
-      !(id_transect == 68 & year %in% 2012) &
-      !(id_transect == 69 & year %in% 2021) &
-      !(id_transect == 90 & year %in% 2007) &
-      !(id_transect == 96 & year %in% 2021) &
-      !(id_transect == 107 & year %in% c(2012, 2017)) &
-      !(id_transect == 109 & year %in% 2022) &
-      !(id_transect == 110 & year %in% 2012) &
-      !(id_transect == 115 & year %in% 2010) &
-      !(id_transect == 116 & year %in% 2018) &
-      !(id_transect == 125 & year %in% 2021) &
-      !(id_transect == 155 & year %in% c(2016, 2022)) &
-      !(id_transect == 168 & year %in% 2018)
-    ) |> 
-  filter(n_indiv >= 1)
-   
-## and now let's extract climate
-load(here("data/daily_tmax_df.RData"))
+  mutate(pres_abs = map_chr(.x = n_indiv,
+                            ~if_else(is.na(.x),
+                                     "absent",
+                                     "present"))) |> 
+  mutate(n_indiv = map2_dbl(.x = pres_abs,
+                            .y = n_indiv,
+                            .f = ~if_else(.x == "absent",
+                                          0,
+                                          .y))) |> 
+  mutate(doy = yday(date))
+
+## c) Data wrangling -----------------------------------------------------
+## examine trends
+
+## now we will apply exclusion criteria:
+##  
+## (1) we'll exclude complete transects with >50% data absences than presences.
+## since populations at these places may be transient or population dynamics may
+## reflect other processes rather than heat accumulation.
+
+## (2) we'll exclude anomalous years for each transect, i.e., those
+##  with late first appearances (i.e., > doy150) with no previous or very early absences
+##  followed by no data for months that may indicate lack of sampling rather than lack of presence.
+##  Similarly, we'll exclude years within tranects having exceptionally low abundances 
+##  when more  than ten year data have been collected (i.e., years with extraordinary sitations that may 
+##  indicate noise, rather than a phenological response to climate (see eg. transect 68 year 2012)
+
+## filter by presence/absence ratio
+pieris_cbms_pres <- pieris_pres_abs |> 
+  group_by(id_transect) |> 
+  count(pres_abs) |>
+  mutate(total_counts_transect = sum(n),
+         prop_pres = n/total_counts_transect) |> 
+  filter(pres_abs == "present" & prop_pres > 0.5) |> 
+  select(id_transect, prop_pres)
 
 
-coords_transects <- piepra_selected_sites |> 
+sites_selection <- unique(pieris_pres_abs$id_transect)
+
+for(transect_i in sites_selection) {
+  pieris_selected_sites_i <- pieris_selected_sites |> 
+    filter(id_transect == transect_i)
+  ggplot_pieris_i <- ggplot(data = pieris_selected_sites_i, 
+                            aes(x = doy,
+                                y = n_indiv,
+                                color = pres_abs)
+  )+
+    geom_point()+
+    geom_line()+
+    labs(x = "Day of Year",
+         y = "N individuals observed",
+         color = NULL,
+         title = paste("Transect", transect_i))+
+    facet_wrap(.~year)+
+    theme_bw()
+  ggsave(plot = ggplot_pieris_i, 
+         filename = here(paste0("figures/cbms_transects_pres_abs/cbms_pieris_count_", transect_i,".png")),
+         width = 2600,
+         height = 2600,
+         units = "px")
+  
+}
+
+## filtering the data set:
+pieris_cbms_selection <- pieris_pres_abs |> 
+  filter(id_transect %in% sites_selection) |> 
+  filter(!(id_transect == 17 & year == 2000),
+         !(id_transect == 29 & year == 1997),    
+         !(id_transect == 47 & year == 2020),
+         !(id_transect == 68 & year == 2012),
+         !(id_transect == 89 & year == 2020), #likely COVID-19 restrictions
+         !(id_transect == 90 & year %in% c(2007, 2021)),
+         !(id_transect == 94 & year == 2020), #likely COVID-19 restrictions
+         !(id_transect == 106 & year == 2020), #likely COVID-19 restrictions
+         !(id_transect == 107 & year == 2020), #likely COVID-19 restrictions
+         !(id_transect == 110 & year == 2020), #likely COVID-19 restrictions
+         !(id_transect == 114 & year == 2020), #likely COVID-19 restrictions
+         !(id_transect == 116 & year == 2020), #likely COVID-19 restrictions
+         !(id_transect == 117 & year == 2020)) #likely COVID-19 restrictions
+  
+
+
+coords_transects <- pieris_cbms_selection |> 
   select(lat, lon) |> 
   group_by(id_transect) |> 
   slice(1) |> 
   ungroup() |> 
   select(lat, lon)
-sites <- piepra_selected_sites |> 
+
+sites <- pieris_cbms_selection |> 
   rename(ID_coords = id_transect)
 
 first_emergence_adult_sites<- sites |> 
@@ -195,6 +251,8 @@ hourly_preds_ratesum_cbms <- rate_sum_preds_hourly |>
 preds_ratesum_cbms <- bind_rows(daily_preds_ratesum_cbms,
                                 hourly_preds_ratesum_cbms)
 write_rds(preds_ratesum_cbms, file = here("data/preds_ratesum_cbms.rds"))
+
+preds_ratesum_cbms <- readRDS(here("data/preds_ratesum_cbms.rds"))
 ## and observations:
 first_emergence_adult_sites <- sites |> 
   group_by(year, ID_coords) |> 
