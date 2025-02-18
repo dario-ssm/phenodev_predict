@@ -81,10 +81,10 @@ pieris_cbms_pres <- pieris_pres_abs |>
   select(id_transect, prop_pres)
 
 
-sites_selection <- unique(pieris_pres_abs$id_transect)
+sites_selection <- unique(pieris_cbms_pres$id_transect)
 
 for(transect_i in sites_selection) {
-  pieris_selected_sites_i <- pieris_selected_sites |> 
+  pieris_selected_sites_i <- pieris_cbms_pres |> 
     filter(id_transect == transect_i)
   ggplot_pieris_i <- ggplot(data = pieris_selected_sites_i, 
                             aes(x = doy,
@@ -164,6 +164,8 @@ daily_temperatures <- easyclimate_temp_transects |>
                                .y = Tmax,
                                .f = ~mean(c(.x, .y), na.rm = TRUE))) |> 
   mutate(year = year(date))
+
+saveRDS(daily_temperatures, file = here::here("data/easyclimate_data_extracted.rds"))
 
 ##daily
 daily_rate_preds_cbms <- tibble()
