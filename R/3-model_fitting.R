@@ -157,8 +157,10 @@ plot_devmodels(temp = gilbert_pieris_data$temp,
   labs(title = my_species_name)+
   khroma::scale_color_batlow(discrete = TRUE)+
   khroma::scale_fill_batlow(discrete = TRUE)
-
-# 2. Predict phenology ------------------------------------------------------
+ggsave(here("figures/gilbert_tpcs.png"),
+       width = 2600,
+       height = 2600,
+       units = "px")# 2. Predict phenology ------------------------------------------------------
 ##### 2.1. Daily res. ----------------------------------------------------------
 ###### a) nonlinear rate summation ----
 load(here("Data/daily_tmax_df.RData"))
